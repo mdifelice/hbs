@@ -11,7 +11,7 @@ define( "SEARCH_TERMS", 5 );
 define( "RANK", 6 );
 define( "DATE", 7 );
 
-function debug( $message ) {
+function message( $message ) {
     print( $message . PHP_EOL );
 }
 
@@ -26,6 +26,7 @@ function parse_arg_settings( $settings ) {
             "help" => null,
             "required" => false,
             "use_value" => false,
+            "validate" => null,
         ],
         $settings
     );
@@ -61,16 +62,6 @@ function finish_progress() {
     printf( PHP_EOL );
 }
 
-function parse_scopus_date( $placeholders ) {
-    if ( $placeholders["start_year"] === $placeholders["end_year"] ) {
-        $date = $placeholders["start_year"];
-    } else {
-        $date = $placeholders["start_year"] . "-" . $placeholders["end_year"];
-    }
-
-    return $date;
-}
-
 function parse_doi( $doi ) {
     $parsed_doi = "";
 
@@ -82,6 +73,7 @@ function parse_doi( $doi ) {
 }
 
 $apis = [
+    // @link https://developer.ieee.org/docs/read/Searching_the_IEEE_Xplore_Metadata_API
     "IEEEXplore" => [
         "parse_articles" => function( $response ) {
             $articles = [];
@@ -98,7 +90,7 @@ $apis = [
                         $raw_article->authors->authors
                     );
                     $article[YEAR] = $raw_article->publication_year;
-                    $article[DOI] = parse_doi( $raw_article->doi );
+                    $article[DOI] = parse_doi( $raw_article->doi ?? null );
 
                     $articles[] = $article;
                 }
@@ -114,6 +106,7 @@ $apis = [
             rawurlencode( IEEE_API_KEY )
         ),
     ],
+    // @link https://www.ncbi.nlm.nih.gov/books/NBK25499/#chapter4.ESearch
     "PubMed" => [
         "parse_articles" => function( $response ) {
             $articles = [];
@@ -150,7 +143,7 @@ $apis = [
                                     $raw_article->authors
                                 );
                                 $article[YEAR] = date( "Y", strtotime( $raw_article->sortpubdate ) );
-                                $article[DOI] = parse_doi( isset( $raw_article->doi ) ? $raw_article->doi : null );
+                                $article[DOI] = parse_doi( $raw_article->doi ?? null );
 
                                 $articles[] = $article;
                             }
@@ -166,7 +159,17 @@ $apis = [
         },
         "request_mask" => "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&retstart={start}&retmax={count}&retmode=json&term={search_terms}&mindate={start_year}&maxdate={end_year}",
     ],
+    // @link https://dev.elsevier.com/documentation/ScopusSearchAPI.wadl
     "Scopus" => [
+        "parse_arguments" => [
+            "end_year" => function( $value, $arguments ) {
+                if ( ! empty( $arguments["start_year"] ) ) {
+                    $value = "-" . $value;
+                }
+
+                return $value;
+            },
+        ],
         "parse_articles" => function( $response ) {
             $articles = [];
 
@@ -183,7 +186,7 @@ $apis = [
                         $article[TITLE] = $entry->{"dc:title"};
                         $article[AUTHORS] = $authors;
                         $article[YEAR] = date( "Y", strtotime( $entry->{"prism:coverDate"} ) );
-                        $article[DOI] = parse_doi( $entry->{"prism:doi"} );
+                        $article[DOI] = parse_doi( $entry->{"prism:doi"} ?? null );
 
                         $articles[] = $article;
                     }
@@ -196,7 +199,7 @@ $apis = [
             return $response->{"search-results"}->{"opensearch:totalResults"};
         },
         "request_mask" => sprintf(
-            "https://api.elsevier.com/content/search/scopus?apiKey=%s&httpAccept=application/json&count={count}&start={start}&query=KEY%%28{search_terms}%%29&date={callback:parse_scopus_date}",
+            "https://api.elsevier.com/content/search/scopus?apiKey=%s&httpAccept=application/json&count={count}&start={start}&query=KEY%%28{search_terms}%%29&date={start_year}{end_year}",
             rawurlencode( SCOPUS_API_KEY )
         ),
     ],
@@ -237,12 +240,15 @@ $possible_args = [
             )
         ),
         "use_value" => true,
+        "validate" => function( $value ) use( $apis ) {
+            return in_array( strtolower( $value ), array_map( 'strtolower', array_keys( $apis ) ) );
+        },
     ],
     "help" => [
         "help" => "Prints help.",
     ],
     "verbose" => [
-        "help" => "Increases debug level.",
+        "help" => "Increases verbosity level.",
     ],
 ];
 
@@ -257,13 +263,13 @@ try {
             $arg = $matches[1];
 
             if ( ! isset( $possible_args[ $arg ] ) ) {
-                throw new Exception( "Unknown option \"" . $arg . "\"" );
+                throw new Exception( "Unknown argument \"" . $arg . "\"" );
             } else {
                 $settings = parse_arg_settings( $possible_args[ $arg ] );
 
                 if ( $settings["use_value"] ) {
                     if ( empty( $argv[ $i + 1 ] ) ) {
-                        throw new Exception( "Missing value for option \"" . $arg . "\"" );
+                        throw new Exception( "Missing value for argument \"" . $arg . "\"" );
                     }
 
                     $value = $argv[ $i + 1 ];
@@ -279,7 +285,7 @@ try {
     }
 
     if ( ! empty( $args["help"] ) ) {
-        debug(
+        message(
             sprintf(
                 "Usage: %s%s%s",
                 $argv[0],
@@ -297,7 +303,7 @@ try {
                                     sprintf(
                                         "--%s%s",
                                         $arg,
-                                        $settings["use_value"] ? "=<value>" : ""
+                                        $settings["use_value"] ? " <value>" : ""
                                     )
                                 ),
                                 $settings["help"]
@@ -315,9 +321,17 @@ try {
 
             if ( ! isset( $args[ $arg ] ) ) {
                 if ( $settings["required"] ) {
-                    throw new Exception( "Missing option \"". $arg . "\"" );
+                    throw new Exception( "Missing argument \"" . $arg . "\"" );
                 } else {
                     $args[ $arg ] = $settings["default"];
+                }
+            } else {
+                if ( $settings["validate"] ) {
+                    $value = $args[ $arg ];
+
+                    if ( ! $settings["validate"]( $value ) ) {
+                        throw new Exception( "Invalid value \"" . $value . "\" for argument \"" . $arg . "\"" );
+                    }
                 }
             }
         }
@@ -354,7 +368,7 @@ try {
 
         foreach ( $apis as $source => $settings ) {
             if ( ! $api || strtolower( $api ) === strtolower( $source ) ) {
-                debug( "Calling API ". $source . " for search terms: \"" . $search_terms . "\"..." );
+                message( "Calling API ". $source . " for search terms: \"" . $search_terms . "\"..." );
 
                 $processed_articles = 0;
                 $total = null;
@@ -370,15 +384,16 @@ try {
 
                     $request = preg_replace_callback(
                         "/{([^}]+)}/",
-                        function( $matches ) use ( $placeholders ) {
+                        function( $matches ) use ( $placeholders, $settings ) {
+                            $argument = $matches[1];
                             $value = "";
 
-                            if ( preg_match( "/^callback:(.+)$/", $matches[1], $sub_matches ) ) {
-                                if ( function_exists( $sub_matches[1] ) ) {
-                                    $value = $sub_matches[1]( $placeholders );
+                            if ( isset( $placeholders[ $argument ] ) ) {
+                                $value = $placeholders[ $argument ];
+
+                                if ( isset( $settings['parse_arguments'][ $argument ] ) ) {
+                                    $value = $settings['parse_arguments'][ $argument ]( $value, $placeholders );
                                 }
-                            } elseif ( isset( $placeholders[ $matches[1] ] ) ) {
-                                $value = $placeholders[ $matches[1] ];
                             }
 
                             return rawurlencode( $value );
@@ -387,7 +402,7 @@ try {
                     );
 
                     if ( $args["verbose"] ) {
-                        debug( "URL: " . $request );
+                        message( "URL: " . $request );
                     }
 
                     $response = file_get_contents( $request );
@@ -489,12 +504,12 @@ try {
             }
         }
 
-        debug( "Articles added: $articles_added\nArticles updated: $articles_updated\nTotal articles: " . $old_articles + $articles_added . ( ! empty( $total_articles_by_provider ) ? " (" . implode( ",", array_map( function( $provider, $total ) { return "$provider: $total"; }, array_keys( $total_articles_by_provider ), $total_articles_by_provider ) ) . ")" : "" ) );
+        message( "Articles added: $articles_added\nArticles updated: $articles_updated\nTotal articles: " . $old_articles + $articles_added . ( ! empty( $total_articles_by_provider ) ? " (" . implode( ",", array_map( function( $provider, $total ) { return "$provider: $total"; }, array_keys( $total_articles_by_provider ), $total_articles_by_provider ) ) . ")" : "" ) );
 
         fclose( $fp );
     }
 } catch ( Exception $e ) {
-    debug( $e->getMessage() );
+    message( $e->getMessage() . " (use the --help argument)" );
 
     return 1;
 }

@@ -11,8 +11,15 @@ define( "SEARCH_TERMS", 5 );
 define( "RANK", 6 );
 define( "DATE", 7 );
 
-function message( $message ) {
-    print( $message . PHP_EOL );
+function message( $message, $verbose = false ) {
+    global $args;
+
+    if (
+        ! $verbose
+        || $args["verbose"]
+    ) {
+        print( $message . PHP_EOL );
+    }
 }
 
 function get_article_index( $article ) {
@@ -72,6 +79,52 @@ function parse_doi( $doi ) {
     return $parsed_doi;
 }
 
+function request_url( $url ) {
+    global $args;
+
+    $cache_file = sys_get_temp_dir() . "/scrapper-" . md5( $url ) . ".tmp";
+    $response = null;
+
+    if (
+        $args["use_cache"]
+        && file_exists( $cache_file )
+        && filemtime( $cache_file ) > time() - ( 24 * 60 * 60 )
+    ) {
+        $response = file_get_contents( $cache_file );
+    }
+
+    if ( null === $response ) {
+        $attempts = 0;
+
+        do {
+            message( "URL" . ( $attempts > 0 ? " (" . ( $attempts + 1 ) . "/" . $args["max_attempts"] . ")" : "" ) . ": " . $url, true );
+
+            $response = file_get_contents( $url );
+
+            if ( false !== $response ) {
+                file_put_contents( $cache_file, $response );
+
+                break;
+            } else {
+                $response = null;
+
+                sleep( 1 );
+            }
+
+            $attempts++;
+        } while ( $attempts < $args["max_attempts"] );
+    }
+
+    if (
+        null === $response
+        && ! $args["ignore_failed_calls"]
+    ) {
+        throw new Exception( "Error calling URL " . $url );
+    }
+
+    return $response;
+}
+
 $apis = [
     // @link https://developer.ieee.org/docs/read/Searching_the_IEEE_Xplore_Metadata_API
     "IEEEXplore" => [
@@ -110,7 +163,7 @@ $apis = [
     "PubMed" => [
         "parse_articles" => function( $response ) {
             $articles = [];
-            $summary_response = file_get_contents(
+            $summary_response = request_url(
                 sprintf(
                     "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=%s&retmode=json",
                     rawurlencode(
@@ -225,6 +278,17 @@ $possible_args = [
         "default" => date( "Y" ),
         "help" => "End year.",
         "use_value" => true,
+    ],
+    "max_attempts" => [
+        "default" => 3,
+        "help" => "Max reading attempts per external call.",
+        "use_value" => true,
+    ],
+    "ignore_failed_calls" => [
+        "help" => "Whether to continue if a call fails.",
+    ],
+    "use_cache" => [
+        "help" => "Whether to retrieve recent calls from cache.",
     ],
     "api" => [
         "help" => sprintf(
@@ -362,112 +426,124 @@ try {
 
         $old_articles = count( $articles );
         $articles_added = 0;
-        $articles_updated = 0;
-        $search_terms = $args["search_terms"];
+        $articles_updated_map = [];
+        $search_terms_array = array_filter(
+            array_map(
+                'trim',
+                explode( PHP_EOL, $args["search_terms"] )
+            )
+        );
         $api = $args["api"];
 
-        foreach ( $apis as $source => $settings ) {
-            if ( ! $api || strtolower( $api ) === strtolower( $source ) ) {
-                message( "Calling API ". $source . " for search terms: \"" . $search_terms . "\"..." );
+        foreach ( $search_terms_array as $search_terms ) {
+            foreach ( $apis as $source => $settings ) {
+                if ( ! $api || strtolower( $api ) === strtolower( $source ) ) {
+                    message( "Calling API ". $source . " for search terms: \"" . $search_terms . "\"..." );
 
-                $processed_articles = 0;
-                $total = null;
+                    $processed_articles = 0;
+                    $total = null;
 
-                do {
-                    $placeholders = array_merge(
-                        $args,
-                        [
-                            "count" => 25,
-                            "start" => $processed_articles,
-                        ]
-                    );
+                    do {
+                        $placeholders = array_merge(
+                            $args,
+                            [
+                                "count" => 25,
+                                "search_terms" => $search_terms,
+                                "start" => $processed_articles,
+                            ]
+                        );
 
-                    $request = preg_replace_callback(
-                        "/{([^}]+)}/",
-                        function( $matches ) use ( $placeholders, $settings ) {
-                            $argument = $matches[1];
-                            $value = "";
+                        $request = preg_replace_callback(
+                            "/{([^}]+)}/",
+                            function( $matches ) use ( $placeholders, $settings ) {
+                                $argument = $matches[1];
+                                $value = "";
 
-                            if ( isset( $placeholders[ $argument ] ) ) {
-                                $value = $placeholders[ $argument ];
+                                if ( isset( $placeholders[ $argument ] ) ) {
+                                    $value = $placeholders[ $argument ];
 
-                                if ( isset( $settings['parse_arguments'][ $argument ] ) ) {
-                                    $value = $settings['parse_arguments'][ $argument ]( $value, $placeholders );
-                                }
-                            }
-
-                            return rawurlencode( $value );
-                        },
-                        $settings["request_mask"]
-                    );
-
-                    if ( $args["verbose"] ) {
-                        message( "URL: " . $request );
-                    }
-
-                    $response = file_get_contents( $request );
-
-                    if ( $response ) {
-                        $decoded_response = json_decode( $response );
-
-                        if ( $decoded_response ) {
-                            if ( $total === null ) {
-                                $total = $settings["parse_total"]( $decoded_response );
-
-                                start_progress( "Receiving articles...", $total );
-                            }
-
-                            $page_articles = $settings["parse_articles"]( $decoded_response );
-
-                            foreach ( $page_articles as $page_article ) {
-                                update_progress();
-;
-                                $processed_articles++;
-
-                                $id = get_article_index( $page_article );
-
-                                if ( ! isset( $articles[ $id ] ) ) {
-                                    $article = [];
-
-                                    $article[TITLE] = $page_article[TITLE];
-                                    $article[SOURCE] = [];
-                                    $article[AUTHORS] = $page_article[AUTHORS];
-                                    $article[YEAR] = $page_article[YEAR];
-                                    $article[DOI] = $page_article[DOI];
-                                    $article[SEARCH_TERMS] = [];
-                                    $article[RANK] = [];
-                                    $article[DATE] = [];
-
-                                    $articles_added++;
-                                } else {
-                                    $article = $articles[ $id ];
-
-                                    $articles_updated++;
+                                    if ( isset( $settings['parse_arguments'][ $argument ] ) ) {
+                                        $value = $settings['parse_arguments'][ $argument ]( $value, $placeholders );
+                                    }
                                 }
 
-                                $source_index = array_search( $source, $article[SOURCE] );
+                                return rawurlencode( $value );
+                            },
+                            $settings["request_mask"]
+                        );
 
-                                $rank = $processed_articles;
-                                $date = date( "Y-m-d H:i:s" );
+                        $response = request_url( $request );
 
-                                if ( $source_index === false || $article[SEARCH_TERMS][ $source_index ] !== $search_terms ) {
-                                    $article[SOURCE][] = $source;
-                                    $article[SEARCH_TERMS][] = $search_terms;
-                                    $article[RANK][] = $rank;
-                                    $article[DATE][] = $date;
-                                } else {
-                                    $article[RANK][ $source_index ] = $rank;
-                                    $article[DATE][ $source_index ] = $date;
+                        if ( $response ) {
+                            $decoded_response = json_decode( $response );
+
+                            if ( $decoded_response ) {
+                                if ( $total === null ) {
+                                    $total = $settings["parse_total"]( $decoded_response );
+
+                                    start_progress( "Receiving articles...", $total );
                                 }
 
-                                $articles[ $id ] = $article;
+                                $page_articles = $settings["parse_articles"]( $decoded_response );
+
+                                foreach ( $page_articles as $page_article ) {
+                                    update_progress();
+    ;
+                                    $processed_articles++;
+
+                                    $id = get_article_index( $page_article );
+
+                                    if ( ! isset( $articles[ $id ] ) ) {
+                                        $article = [];
+
+                                        $article[TITLE] = $page_article[TITLE];
+                                        $article[SOURCE] = [];
+                                        $article[AUTHORS] = $page_article[AUTHORS];
+                                        $article[YEAR] = $page_article[YEAR];
+                                        $article[DOI] = $page_article[DOI];
+                                        $article[SEARCH_TERMS] = [];
+                                        $article[RANK] = [];
+                                        $article[DATE] = [];
+
+                                        $articles_added++;
+                                    } else {
+                                        $article = $articles[ $id ];
+
+                                        $articles_updated_map[ $id ] = true;
+                                    }
+
+                                    $source_index = -1;
+
+                                    foreach ( $article[SOURCE] as $maybe_source_index => $article_source ) {
+                                        if (
+                                            $article_source === $source
+                                            && $article[SEARCH_TERMS][ $maybe_source_index ] === $search_terms ) {
+                                            $source_index = $maybe_source_index;
+                                        }
+                                    }
+
+                                    $rank = $processed_articles;
+                                    $date = date( "Y-m-d H:i:s" );
+
+                                    if ( $source_index === -1 ) {
+                                        $article[SOURCE][] = $source;
+                                        $article[SEARCH_TERMS][] = $search_terms;
+                                        $article[RANK][] = $rank;
+                                        $article[DATE][] = $date;
+                                    } else {
+                                        $article[RANK][ $source_index ] = $rank;
+                                        $article[DATE][ $source_index ] = $date;
+                                    }
+
+                                    $articles[ $id ] = $article;
+                                }
                             }
                         }
-                    }
-                } while ( $processed_articles < $total );
+                    } while ( $processed_articles < $total );
 
-                if ( $total !== null ) {
-                    finish_progress();
+                    if ( $total !== null ) {
+                        finish_progress();
+                    }
                 }
             }
         }
@@ -504,7 +580,7 @@ try {
             }
         }
 
-        message( "Articles added: $articles_added\nArticles updated: $articles_updated\nTotal articles: " . $old_articles + $articles_added . ( ! empty( $total_articles_by_provider ) ? " (" . implode( ",", array_map( function( $provider, $total ) { return "$provider: $total"; }, array_keys( $total_articles_by_provider ), $total_articles_by_provider ) ) . ")" : "" ) );
+        message( "Articles added: $articles_added\nArticles updated: " . count( $articles_updated_map ) . "\nTotal articles: " . $old_articles + $articles_added . ( ! empty( $total_articles_by_provider ) ? " (" . implode( ",", array_map( function( $provider, $total ) { return "$provider: $total"; }, array_keys( $total_articles_by_provider ), $total_articles_by_provider ) ) . ")" : "" ) );
 
         fclose( $fp );
     }

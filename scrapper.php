@@ -23,7 +23,13 @@ function message( $message, $verbose = false ) {
 }
 
 function get_article_index( $article ) {
-    return md5( $article[TITLE] . implode( ",", $article[AUTHORS] ) . $article[YEAR] );
+    if ( ! empty( $article[DOI] ) ) {
+        $hash_seed = $article[DOI];
+    } else {
+        $hash_seed = $article[TITLE] . current( $article[AUTHORS] ) . $article[YEAR];
+    }
+
+    return md5( $hash_seed );
 }
 
 function parse_arg_settings( $settings ) {
@@ -187,6 +193,17 @@ $apis = [
                                 $raw_article = $result->$id;
 
                                 $article = [];
+                                $doi = null;
+
+                                if ( ! empty( $raw_article->articleids ) ) {
+                                    foreach ( $raw_article->articleids as $articleid ) {
+                                        if ( $articleid->idtype === "doi" ) {
+                                            $doi = $articleid->value;
+
+                                            break;
+                                        }
+                                    }
+                                }
 
                                 $article[TITLE] = $raw_article->title;
                                 $article[AUTHORS] = array_map(
@@ -196,7 +213,7 @@ $apis = [
                                     $raw_article->authors
                                 );
                                 $article[YEAR] = date( "Y", strtotime( $raw_article->sortpubdate ) );
-                                $article[DOI] = parse_doi( $raw_article->doi ?? null );
+                                $article[DOI] = parse_doi( $doi );
 
                                 $articles[] = $article;
                             }

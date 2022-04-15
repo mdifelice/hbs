@@ -119,6 +119,8 @@ function request_url( $url ) {
 
             $attempts++;
         } while ( $attempts < $args["max_attempts"] );
+    } else {
+        message( "Retrieving from cache for URL: " . $url, true );
     }
 
     if (
@@ -129,6 +131,17 @@ function request_url( $url ) {
     }
 
     return $response;
+}
+
+function parse_multiple_argument( $name ) {
+    global $args;
+
+    return array_filter(
+        array_map(
+            'trim',
+            explode( PHP_EOL, $args[ $name ] )
+        )
+    );
 }
 
 $apis = [
@@ -167,6 +180,15 @@ $apis = [
     ],
     // @link https://www.ncbi.nlm.nih.gov/books/NBK25499/#chapter4.ESearch
     "PubMed" => [
+        "parse_arguments" => [
+            "search_terms" => function( $value ) {
+                return preg_replace(
+                    "/\"[^\"]+\"/",
+                    "$0[All Fields]",
+                    $value
+                );
+            },
+        ],
         "parse_articles" => function( $response ) {
             $articles = [];
             $summary_response = request_url(
@@ -444,17 +466,15 @@ try {
         $old_articles = count( $articles );
         $articles_added = 0;
         $articles_updated_map = [];
-        $search_terms_array = array_filter(
-            array_map(
-                'trim',
-                explode( PHP_EOL, $args["search_terms"] )
-            )
+        $search_terms_array = parse_multiple_argument( "search_terms" );
+        $selected_apis = array_map(
+            "strtolower",
+            parse_multiple_argument( "api" )
         );
-        $api = $args["api"];
 
         foreach ( $search_terms_array as $search_terms ) {
             foreach ( $apis as $source => $settings ) {
-                if ( ! $api || strtolower( $api ) === strtolower( $source ) ) {
+                if ( empty( $selected_apis ) || in_array( strtolower( $source ), $selected_apis, true ) ) {
                     message( "Calling API ". $source . " for search terms: \"" . $search_terms . "\"..." );
 
                     $processed_articles = 0;

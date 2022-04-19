@@ -343,8 +343,19 @@ $possible_args = [
             )
         ),
         "use_value" => true,
-        "validate" => function( $value ) use( $apis ) {
-            return in_array( strtolower( $value ), array_map( 'strtolower', array_keys( $apis ) ) );
+        "validate" => function() use( $apis ) {
+            $validate = true;
+            $values = parse_multiple_argument( "api" );
+
+            foreach ( $values as $value ) {
+                if ( ! in_array( strtolower( $value ), array_map( 'strtolower', array_keys( $apis ) ) ) ) {
+                    $validate = false;
+
+                    break;
+                }
+            }
+
+            return $validate;
         },
     ],
     "help" => [
@@ -517,6 +528,8 @@ try {
                             if ( $decoded_response ) {
                                 if ( $total === null ) {
                                     $total = $settings["parse_total"]( $decoded_response );
+
+                                    message( "Total articles: " . $total, true );
 
                                     start_progress( "Receiving articles...", $total );
                                 }

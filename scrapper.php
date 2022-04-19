@@ -621,7 +621,9 @@ try {
                 )
             );
 
-            foreach ( $article[SOURCE] as $source ) {
+            $sources = array_unique( $article[SOURCE] );
+
+            foreach ( $sources as $source ) {
                 if ( ! isset( $total_articles_by_provider[ $source ] ) ) {
                     $total_articles_by_provider[ $source ] = 0;
                 }

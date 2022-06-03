@@ -1,0 +1,8 @@
+IEEE:
+  apikey: WRITE YOUR API KEY HERE!
+
+SCOPUS:
+  apikey: WRITE YOUR API KEY HERE!
+
+PARAMS:
+  dummy: Another useful params incoming...

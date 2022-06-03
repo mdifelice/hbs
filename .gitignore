@@ -1,3 +1,4 @@
+__pycache__
+config.yml
 *.csv
 *.sh
-config.yml

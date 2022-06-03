@@ -3,6 +3,7 @@
 
 import argparse
 import yaml
+from repos import ieee
 
 # Create the arguments parser
 parser = argparse.ArgumentParser()
@@ -23,12 +24,19 @@ def holaMundo(name='Mysterious Someone'):
 if __name__ == "__main__" :
     args = parser.parse_args()
     
+    '''
+    TODO: Migrar esto a una función que parseé los argumentos.
     if not args.title:
         holaMundo()
     else:
         holaMundo(args.title)
+    '''
 
-    yaml = read_yaml("config.yml")
-    print(yaml)
-    print(yaml['IEEE']['apikey'])
-    print("Adios mundo :O")
+    print("Cargando archivo de configuración")
+    yaml = read_yaml("config.yml") # TODO: Pendiente hacer chequeo de errores
+
+    print("Cargando clases de repositorios")    
+    clase = ieee()
+    clase.search()
+
+    print("Fin de ejecución")

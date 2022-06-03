@@ -1,0 +1,28 @@
+@startuml
+
+repo <|-- ieee
+
+class repo {
+    -- Parameters --
+    - String url
+    - String apikey
+    - String start_year
+    - String end_year
+    - String keywords
+
+    -- Contructors & destructors --
+    + repo()
+
+    -- Methods --
+    + search() : int
+}
+
+class ieee {
+    -- Contructors & destructors --
+    + ieee()
+
+    -- Public methods --
+    + Initialize() : bool
+}
+
+@enduml

@@ -16,7 +16,8 @@ class repo(ABC):
         self.dictionary = {}
         self.params = {}
         self.build_dictionary()
-        return self.validate_dictionary()
+        self.validate_dictionary()
+         
 
     @abstractmethod
     def build_dictionary(self):
@@ -28,13 +29,11 @@ class repo(ABC):
 
     def validate_dictionary(self):
         if "default" not in self.dictionary:
-            print(type(self).__name__ + ": Missing field 'default' in dictionary!")
-            return False
+            raise ValueError("Missing field 'default' in " + type(self).__name__ + "'s dictionary!")
         elif "title" not in self.dictionary:
-            print(type(self).__name__ + ": Missing field 'title' in dictionary!")
-            return False
+            raise ValueError("Missing field 'title' in " + type(self).__name__ + "'s dictionary!")
         else:
-            return None
+            return True
 
     def add_query_param(self, value:str, type:str='default') -> None:
         '''This pretends do a conversion between args and api params
@@ -55,12 +54,16 @@ class repo(ABC):
     def search(self):
         pass
 
+    def say_hello(self):
+        print("Hola! Soy " + type(self).__name__)
+
+
 # Clase dedicada a búsquedas en IEEEXplore
 class ieee(repo):
     '''This is a docstring. I have created a new class'''
-    def __init__(self, basePath:str, apikey:str) -> None:
+    def __init__(self, basePath:str, apikey:str):
         super().__init__(basePath, apikey)
-        print(self.dictionary)
+        print(self.url)
 
     def build_dictionary(self):
         self.dictionary['default'] = 'meta_data'
@@ -79,4 +82,16 @@ class ieee(repo):
         ans = requests.get(self.url,params=self.params)
         for art in range(ans.json()['total_records']):
             print(' - ' + ans.json()['articles'][art]['title'])
+        
+# Clase dedicada a búsquedas en Scopus
+class scopus(repo):
+    def __init__(self, basePath: str, apikey: str):
+        super().__init__(basePath, apikey)
+        print(self.url)
 
+
+    def search(self):
+        return super().search()
+
+    def build_dictionary(self):
+        return super().build_dictionary()

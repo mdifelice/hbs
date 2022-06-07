@@ -3,14 +3,16 @@
 
 import argparse
 import yaml
-from repos import ieee
+import traceback
+from repos import ieee, scopus
 
 # Create the arguments parser
 parser = argparse.ArgumentParser()
-parser.add_argument('--title', type=str, required=False)
-parser.add_argument('--abstract', type=str, required=False)
-parser.add_argument('--start-year', type=str, required=False)
-parser.add_argument('--end-year', type=str, required=False)
+parser.add_argument('--title', dest='title', type=str, required=False)
+parser.add_argument('--abstract', dest='abstract', type=str, required=False)
+parser.add_argument('--from-year', dest='fromYear', type=str, required=False)
+parser.add_argument('--to-year', dest='toYear', type=str, required=False)
+parser.add_argument('default_query', metavar='query', type=str)
 
 
 def read_yaml(file_path):
@@ -35,11 +37,27 @@ if __name__ == "__main__" :
     print("Cargando archivo de configuración")
     cfg = read_yaml("config.yml") # TODO: Pendiente hacer chequeo de errores
 
-    print("Cargando clases de repositorios")    
-    repo = ieee(cfg['IEEE']['basePath'], cfg['IEEE']['apikey'])
-    repo.add_query_param('mini review machine learning applications')
-    repo.add_query_param(2022,'from_year')
-    repo.search()
-    repo.validate_dictionary()
+    print("Cargando clases de repositorios")
+    repos = { "ieee": ieee, "scopus": scopus }
+    for repo in repos:
+        try:
+            id = repos[repo](cfg[repo]['basePath'], cfg[repo]['apikey'])
+            if id is not None:
+                id.say_hello()
+                id.add_query_param(args.default_query)
+                id.add_query_param(args.fromYear,'from_year')
+                id.add_query_param(args.title,'title')
+                id.search()
+                del id
+        except Exception:
+            traceback.print_exc()
+
+    #repo = ieee(cfg['ieee']['basePath'], cfg['ieee']['apikey'])
+    #repo.add_query_param(args.default_query)
+    #repo.add_query_param(args.fromYear,'from_year')
+    #repo.add_query_param(args.title,'title')
+    #repo.search()
+    #repo.validate_dictionary()
+    del repo
 
     print("Fin de ejecución")

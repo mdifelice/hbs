@@ -1,6 +1,7 @@
 @startuml
 
 repo <|-- ieee
+repo <|-- scopus
 
 class repo {
     -- Parameters --
@@ -20,6 +21,14 @@ class repo {
 class ieee {
     -- Contructors & destructors --
     + ieee()
+
+    -- Public methods --
+    + Initialize() : bool
+}
+
+class scopus {
+    -- Contructors & destructors --
+    + scopus()
 
     -- Public methods --
     + Initialize() : bool

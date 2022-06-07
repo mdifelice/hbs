@@ -33,10 +33,13 @@ if __name__ == "__main__" :
     '''
 
     print("Cargando archivo de configuración")
-    yaml = read_yaml("config.yml") # TODO: Pendiente hacer chequeo de errores
+    cfg = read_yaml("config.yml") # TODO: Pendiente hacer chequeo de errores
 
     print("Cargando clases de repositorios")    
-    clase = ieee()
-    clase.search()
+    repo = ieee(cfg['IEEE']['basePath'], cfg['IEEE']['apikey'])
+    repo.add_query_param('mini review machine learning applications')
+    repo.add_query_param(2022,'from_year')
+    repo.search()
+    repo.validate_dictionary()
 
     print("Fin de ejecución")

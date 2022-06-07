@@ -1,7 +1,9 @@
 IEEE:
+  url: API URL
   apikey: WRITE YOUR API KEY HERE!
 
 SCOPUS:
+  url: API URL
   apikey: WRITE YOUR API KEY HERE!
 
 PARAMS:
